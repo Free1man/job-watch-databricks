@@ -7,6 +7,7 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,install requests package
 # MAGIC %pip install requests
 
 # COMMAND ----------
@@ -16,6 +17,7 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,import libraries and configure job watch environment
 import json
 import os
 import sys
@@ -53,6 +55,7 @@ from job_watch.rss_sources import canonicalize_url, fetch_rss_url, source_search
 
 # COMMAND ----------
 
+# DBTITLE 1,generate run ID and fetch data retrieval details
 RUN_ID = str(uuid.uuid4())
 FETCHED_AT = datetime.now(timezone.utc)
 
@@ -72,6 +75,7 @@ print("Direct sources:", [s["source"] for s in DIRECT_SOURCES])
 
 # COMMAND ----------
 
+# DBTITLE 1,create job watch schema and initial tables setup
 spark.sql("CREATE SCHEMA IF NOT EXISTS job_watch")
 
 spark.sql("""
@@ -118,6 +122,7 @@ CREATE TABLE IF NOT EXISTS job_watch.gold_seek_high_rate_roles (
 
 # COMMAND ----------
 
+# DBTITLE 1,initialize data storage for processing results
 bronze_rows = []
 silver_rows = []
 errors = []
@@ -132,6 +137,7 @@ seen_canonical_urls = set()
 
 # COMMAND ----------
 
+# DBTITLE 1,process and filter payload for job results storage
 def handle_payload(payload, source_name, allowed_domains, query):
     """Save raw payload to bronze buffer and accepted items to silver buffer."""
     bronze_rows.append({
@@ -198,6 +204,7 @@ def handle_payload(payload, source_name, allowed_domains, query):
 
 # COMMAND ----------
 
+# DBTITLE 1,search sources and handle query results with errors
 for source_config in SEARCH_SOURCES:
     source_name = source_config["source"]
     allowed_domains = source_config.get("allowed_domains", [])
@@ -227,6 +234,7 @@ for source_config in SEARCH_SOURCES:
 
 # COMMAND ----------
 
+# DBTITLE 1,execute direct URL scraping and handle results
 if DIRECT_SCRAPE_ENABLED:
     for source_config in DIRECT_SOURCES:
         source_name = source_config["source"]
@@ -258,6 +266,7 @@ else:
 
 # COMMAND ----------
 
+# DBTITLE 1,fetch and process custom RSS feed data with error handl ...
 for feed in CUSTOM_RSS_FEEDS:
     source_name = feed["source"]
     feed_url = feed["url"]
@@ -286,6 +295,7 @@ for feed in CUSTOM_RSS_FEEDS:
 
 # COMMAND ----------
 
+# DBTITLE 1,validate data processing results and handle errors
 print("=" * 100)
 print("Bronze rows:", len(bronze_rows))
 print("Silver rows:", len(silver_rows))
@@ -316,6 +326,7 @@ if not silver_rows:
 
 # COMMAND ----------
 
+# DBTITLE 1,define bronze schema and save search runs data
 bronze_schema = StructType([
     StructField("run_id", StringType()),
     StructField("source", StringType()),
@@ -337,6 +348,7 @@ bronze_df.write.mode("append").saveAsTable("job_watch.bronze_search_runs")
 
 # COMMAND ----------
 
+# DBTITLE 1,update job watch results with new seek data
 silver_schema = StructType([
     StructField("source", StringType()),
     StructField("result_id", StringType()),
@@ -380,6 +392,7 @@ WHEN NOT MATCHED THEN INSERT *
 
 # COMMAND ----------
 
+# DBTITLE 1,create high rate roles table from silver seek results
 spark.sql(f"""
 CREATE OR REPLACE TABLE job_watch.gold_seek_high_rate_roles AS
 SELECT
@@ -403,6 +416,7 @@ ORDER BY hourly_max DESC, last_seen_at DESC
 
 # COMMAND ----------
 
+# DBTITLE 1,fetch high rate job roles with hourly salary details
 display(spark.sql("""
 SELECT
   title,
@@ -422,6 +436,7 @@ ORDER BY hourly_max DESC, last_seen_at DESC
 
 # COMMAND ----------
 
+# DBTITLE 1,summarize job watch results by source and rate metrics
 display(spark.sql("""
 SELECT
   source,
