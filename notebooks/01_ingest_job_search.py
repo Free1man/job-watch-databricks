@@ -18,6 +18,7 @@
 # COMMAND ----------
 
 # DBTITLE 1,import libraries and configure job watch environment
+from collections import Counter
 import json
 import os
 import sys
@@ -307,6 +308,14 @@ if direct_warnings:
     print("Direct warning sample:")
     for warning in direct_warnings[:10]:
         print(warning)
+
+print("Rejected reasons:")
+for reason, count in Counter(row["reason"] for row in rejected_rows).most_common():
+    print(f"{reason}: {count}")
+
+print("Rejected by source/reason:")
+for (source, reason), count in Counter((row["source"], row["reason"]) for row in rejected_rows).most_common():
+    print(f"{source} | {reason}: {count}")
 
 print("Rejected sample:")
 for row in rejected_rows[:20]:

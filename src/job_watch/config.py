@@ -91,8 +91,10 @@ DIRECT_SOURCES = [
         "respect_robots_txt": True,
         "delay_seconds": 2,
         "urls": [
-            "https://www.trademe.co.nz/a/jobs/it/search?search_string=software%20developer%20contract&location=2",
-            "https://www.trademe.co.nz/a/jobs/it/search?search_string=software%20engineer%20contract&location=2",
+            "https://www.trademe.co.nz/a/jobs/it/programming-development/auckland/search?search_string=software%20developer%20contract",
+            "https://www.trademe.co.nz/a/jobs/it/programming-development/auckland/search?search_string=software%20engineer%20contract",
+            "https://www.trademe.co.nz/a/jobs/it/programming-development/auckland/search?search_string=technical%20lead%20contract",
+            "https://www.trademe.co.nz/a/jobs/it/programming-development/auckland",
         ],
     },
 ]

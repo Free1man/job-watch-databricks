@@ -15,7 +15,7 @@ def canonicalize_url(url: str | None) -> str:
     parsed = urlparse(url.strip())
     query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
     blocked_prefixes = ("utm_",)
-    blocked_exact = {"tracking", "srsltid", "gclid", "fbclid"}
+    blocked_exact = {"tracking", "srsltid", "gclid", "fbclid", "rsqid"}
     clean_pairs = [
         (k, v)
         for k, v in query_pairs

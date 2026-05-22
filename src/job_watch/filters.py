@@ -48,6 +48,8 @@ def is_probably_job_result(source_name: str, url: str, title: str, content: str)
         return False, "seek url does not look like job/search result"
     if source_name in {"bing_trademe", "direct_trademe"} and "trademe.co.nz" not in url_lower:
         return False, "trademe url does not look valid"
+    if source_name == "direct_trademe" and "/auckland/" not in url_lower:
+        return False, "trademe direct result is not an Auckland listing URL"
     if source_name in {"bing_indeed", "direct_indeed"} and "indeed.com" not in url_lower:
         return False, "indeed url does not look valid"
     if source_name == "bing_jobs_govt_nz" and "jobs.govt.nz" not in url_lower:
