@@ -1,16 +1,14 @@
 from job_watch import config
 from job_watch.datasources.seek import SeekDataSource
 from job_watch.datasources.trademe import TradeMeDataSource
-from job_watch.filters import url_allowed
+from job_watch.url_utils import domain_allowed
 from job_watch.models import normalize_raw_result
 from job_watch.rss_sources import canonicalize_url
 
 
 def _single_keyword_criteria():
     return config.SEARCH_CRITERIA.__class__(
-        location=config.SEARCH_CRITERIA.location,
-        contract_only=config.SEARCH_CRITERIA.contract_only,
-        keywords=config.SEARCH_CRITERIA.keywords[:1],
+        keywords=("Auckland", "contract", "software developer"),
         min_rate=config.SEARCH_CRITERIA.min_rate,
         max_rate=config.SEARCH_CRITERIA.max_rate,
         pay_period=config.SEARCH_CRITERIA.pay_period,
@@ -24,7 +22,7 @@ def _assert_accepted_provider_result(payload: dict, expected_mode: str):
     assert raw.provider == payload["provider"]
     assert raw.source == payload["source"]
     assert raw.scrape_mode == expected_mode
-    assert url_allowed(clean_url, payload["allowed_domains"])
+    assert domain_allowed(clean_url, payload["allowed_domains"])
 
 
 def test_seek_declares_html_support():

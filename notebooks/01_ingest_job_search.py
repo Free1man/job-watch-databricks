@@ -61,7 +61,7 @@ def _add_project_src_to_path():
 _add_project_src_to_path()
 
 from job_watch.config import DATA_SOURCES, MIN_RATE, SEARCH_CRITERIA, SITE_FILTERS
-from job_watch.filters import url_allowed
+from job_watch.url_utils import domain_allowed
 from job_watch.models import normalize_raw_result
 from job_watch.parsing import make_result_id, parse_hourly_rate
 from job_watch.rss_sources import canonicalize_url
@@ -203,7 +203,7 @@ def handle_payload(payload, source_config, query):
         reject_reason = None
         if not clean_url:
             reject_reason = "missing url"
-        elif not url_allowed(clean_url, allowed_domains):
+        elif not domain_allowed(clean_url, allowed_domains):
             reject_reason = "domain not allowed"
         elif clean_url in seen_canonical_urls:
             reject_reason = "duplicate url"

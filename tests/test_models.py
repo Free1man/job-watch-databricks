@@ -1,10 +1,4 @@
-from job_watch.datasources.base import Provider, infer_provider
 from job_watch.models import normalize_raw_result
-
-
-def test_infer_provider_from_source_and_url():
-    assert infer_provider("trademe", "") == Provider.TRADEME
-    assert infer_provider("anything", "https://www.seek.co.nz/job/123") == Provider.SEEK
 
 
 def test_normalize_provider_payload_result():

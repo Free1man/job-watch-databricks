@@ -9,9 +9,7 @@ from job_watch.ui_sources import UiSearchNotImplemented
 
 def _single_keyword_criteria():
     return config.SEARCH_CRITERIA.__class__(
-        location=config.SEARCH_CRITERIA.location,
-        contract_only=config.SEARCH_CRITERIA.contract_only,
-        keywords=config.SEARCH_CRITERIA.keywords[:1],
+        keywords=("Auckland", "contract", "software developer"),
         min_rate=config.SEARCH_CRITERIA.min_rate,
         max_rate=config.SEARCH_CRITERIA.max_rate,
         pay_period=config.SEARCH_CRITERIA.pay_period,

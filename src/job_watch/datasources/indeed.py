@@ -15,10 +15,8 @@ class IndeedDataSource(DataSource):
     allowed_domains = ("nz.indeed.com", "indeed.com")
 
     def queries(self, criteria: SearchCriteria) -> tuple[str, ...]:
-        base_terms = [criteria.location]
-        if criteria.contract_term:
-            base_terms.append(criteria.contract_term)
-        return tuple(f'site:nz.indeed.com {" ".join(base_terms)} "{keyword}"' for keyword in criteria.keywords[:4])
+        query_text = criteria.query_text()
+        return tuple([f"site:nz.indeed.com {query_text}"] + [f"site:nz.indeed.com {query_text} {term}" for term in criteria.rate_terms()])
 
     def fetch_rss(self, query: str) -> dict:
         feed_url = "https://www.bing.com/search?" + urlencode(
@@ -49,10 +47,7 @@ class IndeedDataSource(DataSource):
         return super().result_url_allowed(url) and "indeed.com" in url.lower()
 
     def urls(self, criteria: SearchCriteria) -> tuple[str, ...]:
-        query = f'{criteria.keywords[0]} {criteria.contract_term}'.strip()
-        return (
-            "https://nz.indeed.com/jobs?" + urlencode({"q": query, "l": criteria.location}),
-        )
+        return ("https://nz.indeed.com/jobs?" + urlencode({"q": criteria.query_text()}),)
 
     def html_search(self, criteria: SearchCriteria, site_filters: tuple[str, ...] = ()) -> dict:
         urls = self.urls(criteria)

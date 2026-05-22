@@ -18,26 +18,22 @@ class TradeMeDataSource(DataSource):
     allowed_domains = ("trademe.co.nz", "www.trademe.co.nz")
 
     def queries(self, criteria: SearchCriteria) -> tuple[str, ...]:
-        base_terms = [criteria.location]
-        if criteria.contract_term:
-            base_terms.append(criteria.contract_term)
-        queries = [f'site:trademe.co.nz/a/jobs {" ".join(base_terms)} "{keyword}"' for keyword in criteria.keywords[:7]]
-        queries.extend(f"site:trademe.co.nz/a/jobs {criteria.location} {term}" for term in criteria.rate_terms())
+        query_text = criteria.query_text()
+        queries = [f"site:trademe.co.nz/a/jobs {query_text}"]
+        queries.extend(f"site:trademe.co.nz/a/jobs {query_text} {term}" for term in criteria.rate_terms())
         return tuple(queries)
 
     def urls(self, criteria: SearchCriteria) -> tuple[str, ...]:
-        location_slug = "auckland" if criteria.location.lower() == "auckland" else quote_plus(criteria.location.lower())
-        urls = []
-        for keyword in criteria.keywords[:3]:
-            search_text = keyword
-            if criteria.contract_only:
-                search_text = f"{search_text} contract"
-            urls.append(
-                "https://www.trademe.co.nz/a/jobs/it/programming-development/"
-                f"{location_slug}/search?search_string={quote_plus(search_text)}"
-            )
-        urls.append(f"https://www.trademe.co.nz/a/jobs/it/programming-development/{location_slug}")
-        return tuple(urls)
+        keywords_lower = {keyword.lower() for keyword in criteria.keywords}
+        location_slug = "auckland" if "auckland" in keywords_lower else ""
+        role_keywords = [keyword for keyword in criteria.keywords if keyword.lower() not in {"auckland", "contract"}]
+        search_text = " ".join(role_keywords[:3])
+        if "contract" in keywords_lower:
+            search_text = f"{search_text} contract".strip()
+        path = "https://www.trademe.co.nz/a/jobs/it/programming-development"
+        if location_slug:
+            path = f"{path}/{location_slug}"
+        return (f"{path}/search?search_string={quote_plus(search_text)}", path)
 
     def fetch_rss(self, query: str) -> dict:
         feed_url = "https://www.bing.com/search?" + urlencode(

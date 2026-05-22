@@ -1,11 +1,11 @@
-"""Generic filtering helpers shared by datasources."""
+"""URL helpers shared across providers and notebooks."""
 
 from __future__ import annotations
 
 from urllib.parse import urlparse
 
 
-def url_allowed(url: str, allowed_domains: list[str] | tuple[str, ...]) -> bool:
+def domain_allowed(url: str, allowed_domains: list[str] | tuple[str, ...]) -> bool:
     if not allowed_domains:
         return True
     host = urlparse(url).netloc.lower()

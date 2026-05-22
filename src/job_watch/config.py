@@ -15,16 +15,13 @@ RSS_ENABLED = True
 HTML_ENABLED = True
 UI_ENABLED = False
 
-# Use None for all registered providers, or a set like {Provider.SEEK, Provider.TRADEME}.
 ENABLED_PROVIDERS: set[Provider] | None = None
-
-# Optional site filters used by generic web-search providers such as Bing/Google.
 SITE_FILTERS = ("seek.co.nz", "trademe.co.nz", "nz.indeed.com")
 
 SEARCH_FILTER = SearchFilter(
-    location="Auckland",
-    contract_only=True,
     keywords=(
+        "Auckland",
+        "contract",
         "software developer",
         "software engineer",
         "senior developer",
@@ -37,6 +34,7 @@ SEARCH_FILTER = SearchFilter(
         "AWS",
     ),
     min_rate=MIN_RATE,
+    max_rate=None,
     pay_period=PayPeriod.HOURLY,
 )
 

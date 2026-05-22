@@ -16,19 +16,19 @@ class SeekDataSource(DataSource):
     allowed_domains = ("seek.co.nz", "www.seek.co.nz", "nz.seek.com")
 
     def queries(self, criteria: SearchCriteria) -> tuple[str, ...]:
-        base_terms = [criteria.location]
-        if criteria.contract_term:
-            base_terms.append(criteria.contract_term)
-        queries = [f'site:seek.co.nz/job {" ".join(base_terms)} "{keyword}"' for keyword in criteria.keywords]
-        queries.extend(f"site:seek.co.nz/job {criteria.location} {term}" for term in criteria.rate_terms())
+        query_text = criteria.query_text()
+        queries = [f"site:seek.co.nz/job {query_text}"]
+        queries.extend(f"site:seek.co.nz/job {query_text} {term}" for term in criteria.rate_terms())
         return tuple(queries)
 
     def urls(self, criteria: SearchCriteria) -> tuple[str, ...]:
-        location_slug = "All-Auckland" if criteria.location.lower() == "auckland" else criteria.location.replace(" ", "-")
+        keywords_lower = {keyword.lower() for keyword in criteria.keywords}
+        location_slug = "All-Auckland" if "auckland" in keywords_lower else "All-New-Zealand"
+        contract_part = "-contract" if "contract" in keywords_lower else ""
+        role_keywords = [keyword for keyword in criteria.keywords if keyword.lower() not in {"auckland", "contract"}]
         urls = []
-        for keyword in criteria.keywords[:3]:
+        for keyword in role_keywords[:3]:
             keyword_slug = keyword.lower().replace(".", "").replace(" ", "-")
-            contract_part = "-contract" if criteria.contract_only else ""
             urls.append(f"https://www.seek.co.nz/{keyword_slug}{contract_part}-jobs/in-{location_slug}")
         return tuple(urls)
 
