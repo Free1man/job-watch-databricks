@@ -1,102 +1,39 @@
-"""Configuration for the public RSS/search job watcher."""
+"""Configuration for the job watcher."""
+
+from __future__ import annotations
+
+from .datasources import PayPeriod, Provider, SearchFilter, enabled_datasources
 
 MIN_RATE = 125
 
-# Authorized direct scraping is on by default per current project scope.
-# Keep this polite: allowlisted URLs only, low rate, no auth bypass, no evasion.
-DIRECT_SCRAPE_ENABLED = True
+RSS_ENABLED = True
+HTML_ENABLED = True
+UI_ENABLED = False
 
-ROLE_KEYWORDS = [
-    "software developer",
-    "software engineer",
-    "senior developer",
-    "senior software engineer",
-    "full stack",
-    "full-stack",
-    "technical lead",
-    "tech lead",
-    "solution architect",
-    "payments architect",
-    ".net",
-    "aws",
-    "backend",
-    "back end",
-]
+# Use None for all registered providers, or a set like {Provider.SEEK, Provider.TRADEME}.
+ENABLED_PROVIDERS: set[Provider] | None = None
 
-SEARCH_SOURCES = [
-    {
-        "source": "bing_seek",
-        "type": "bing_rss",
-        "allowed_domains": ["seek.co.nz", "www.seek.co.nz", "nz.seek.com"],
-        "queries": [
-            'site:seek.co.nz/job Auckland contract "software developer"',
-            'site:seek.co.nz/job Auckland contract "software engineer"',
-            'site:seek.co.nz/job Auckland contract "senior developer"',
-            'site:seek.co.nz/job Auckland contract "senior software engineer"',
-            'site:seek.co.nz/job Auckland contract "full stack"',
-            'site:seek.co.nz/job Auckland contract "technical lead"',
-            'site:seek.co.nz/job Auckland contract "solution architect"',
-            'site:seek.co.nz/job Auckland contract "payments architect"',
-            'site:seek.co.nz/job Auckland contract ".NET"',
-            'site:seek.co.nz/job Auckland contract "AWS"',
-            'site:seek.co.nz/job Auckland "$125"',
-            'site:seek.co.nz/job Auckland "$130"',
-            'site:seek.co.nz/job Auckland "$140"',
-        ],
-    },
-    {
-        "source": "bing_trademe",
-        "type": "bing_rss",
-        "allowed_domains": ["trademe.co.nz", "www.trademe.co.nz"],
-        "queries": [
-            'site:trademe.co.nz/a/jobs Auckland contract "software developer"',
-            'site:trademe.co.nz/a/jobs Auckland contract "software engineer"',
-            'site:trademe.co.nz/a/jobs Auckland contract "senior developer"',
-            'site:trademe.co.nz/a/jobs Auckland contract "technical lead"',
-            'site:trademe.co.nz/a/jobs Auckland contract "solution architect"',
-            'site:trademe.co.nz/a/jobs Auckland "$125"',
-            'site:trademe.co.nz/a/jobs Auckland "$130"',
-        ],
-    },
-    {
-        "source": "bing_indeed",
-        "type": "bing_rss",
-        "allowed_domains": ["nz.indeed.com", "indeed.com"],
-        "queries": [
-            'site:nz.indeed.com Auckland contract "software developer"',
-            'site:nz.indeed.com Auckland contract "software engineer"',
-            'site:nz.indeed.com Auckland contract "senior developer"',
-            'site:nz.indeed.com Auckland contract "technical lead"',
-        ],
-    },
-]
+# Optional site filters used by generic web-search providers such as Bing/Google.
+SITE_FILTERS = ("seek.co.nz", "trademe.co.nz", "nz.indeed.com")
 
-DIRECT_SOURCES = [
-    {
-        "source": "direct_seek",
-        "type": "direct_html",
-        "allowed_domains": ["seek.co.nz", "www.seek.co.nz"],
-        "respect_robots_txt": True,
-        "delay_seconds": 2,
-        "urls": [
-            "https://www.seek.co.nz/software-developer-contract-jobs/in-All-Auckland",
-            "https://www.seek.co.nz/software-engineer-contract-jobs/in-All-Auckland",
-            "https://www.seek.co.nz/technical-lead-contract-jobs/in-All-Auckland",
-        ],
-    },
-    {
-        "source": "direct_trademe",
-        "type": "direct_html",
-        "allowed_domains": ["trademe.co.nz", "www.trademe.co.nz"],
-        "respect_robots_txt": True,
-        "delay_seconds": 2,
-        "urls": [
-            "https://www.trademe.co.nz/a/jobs/it/programming-development/auckland/search?search_string=software%20developer%20contract",
-            "https://www.trademe.co.nz/a/jobs/it/programming-development/auckland/search?search_string=software%20engineer%20contract",
-            "https://www.trademe.co.nz/a/jobs/it/programming-development/auckland/search?search_string=technical%20lead%20contract",
-            "https://www.trademe.co.nz/a/jobs/it/programming-development/auckland",
-        ],
-    },
-]
+SEARCH_FILTER = SearchFilter(
+    location="Auckland",
+    contract_only=True,
+    keywords=(
+        "software developer",
+        "software engineer",
+        "senior developer",
+        "senior software engineer",
+        "full stack",
+        "technical lead",
+        "solution architect",
+        "payments architect",
+        ".NET",
+        "AWS",
+    ),
+    min_rate=MIN_RATE,
+    pay_period=PayPeriod.HOURLY,
+)
 
-CUSTOM_RSS_FEEDS = []
+SEARCH_CRITERIA = SEARCH_FILTER
+DATA_SOURCES = enabled_datasources(ENABLED_PROVIDERS)

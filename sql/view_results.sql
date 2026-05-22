@@ -1,4 +1,7 @@
 SELECT
+  provider,
+  scrape_mode,
+  source,
   title,
   hourly_min,
   hourly_max,

@@ -28,26 +28,43 @@ from datetime import datetime, timezone
 from pyspark.sql import functions as F
 from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 
-# Make `src/job_watch` importable both in Databricks Repos and local runs.
-for candidate in [
-    os.path.abspath("../src"),
-    os.path.abspath("./src"),
-    "/Workspace/Repos/seek-job-watch/src",
-]:
-    if candidate not in sys.path and os.path.exists(candidate):
-        sys.path.append(candidate)
+# Make `src/job_watch` importable in Databricks Repos/Workspace files and local runs.
+def _add_project_src_to_path():
+    roots = []
 
-from job_watch.config import (
-    CUSTOM_RSS_FEEDS,
-    DIRECT_SCRAPE_ENABLED,
-    DIRECT_SOURCES,
-    MIN_RATE,
-    SEARCH_SOURCES,
-)
-from job_watch.direct_sources import direct_html_search
-from job_watch.filters import is_probably_job_result, url_allowed
+    def add_root(path):
+        if path and path not in roots:
+            roots.append(path)
+
+    add_root(os.getcwd())
+    if "__file__" in globals():
+        add_root(os.path.dirname(os.path.abspath(__file__)))
+
+    try:
+        notebook_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+        add_root(os.path.dirname("/Workspace" + notebook_path))
+    except Exception:
+        pass
+
+    for root in list(roots):
+        add_root(os.path.dirname(root))
+        if os.path.basename(root) == "notebooks":
+            add_root(os.path.dirname(root))
+
+    for root in roots:
+        candidate = os.path.abspath(os.path.join(root, "src"))
+        if candidate not in sys.path and os.path.exists(os.path.join(candidate, "job_watch")):
+            sys.path.insert(0, candidate)
+            return
+
+
+_add_project_src_to_path()
+
+from job_watch.config import DATA_SOURCES, MIN_RATE, SEARCH_CRITERIA, SITE_FILTERS
+from job_watch.filters import url_allowed
+from job_watch.models import normalize_raw_result
 from job_watch.parsing import make_result_id, parse_hourly_rate
-from job_watch.rss_sources import canonicalize_url, fetch_rss_url, source_search
+from job_watch.rss_sources import canonicalize_url
 
 # COMMAND ----------
 
@@ -63,16 +80,15 @@ FETCHED_AT = datetime.now(timezone.utc)
 print("RUN_ID:", RUN_ID)
 print("FETCHED_AT:", FETCHED_AT.isoformat())
 print("MIN_RATE:", MIN_RATE)
-print("Search sources:", [s["source"] for s in SEARCH_SOURCES])
-print("Direct scraping enabled:", DIRECT_SCRAPE_ENABLED)
-print("Direct sources:", [s["source"] for s in DIRECT_SOURCES])
+print("Providers:", [datasource.provider.value for datasource in DATA_SOURCES])
+print("Site filters:", SITE_FILTERS)
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Create Delta schema/tables
 # MAGIC
-# MAGIC Table names still use the old `seek` names for compatibility.
+# MAGIC Table names still use the old `seek` names until a later table migration.
 
 # COMMAND ----------
 
@@ -87,24 +103,32 @@ CREATE TABLE IF NOT EXISTS job_watch.bronze_search_runs (
   query STRING,
   response_json STRING
 )
+USING DELTA
 """)
 
 spark.sql("""
 CREATE TABLE IF NOT EXISTS job_watch.silver_seek_results (
+  provider STRING,
+  scrape_mode STRING,
   source STRING,
   result_id STRING,
   title STRING,
   url STRING,
   content STRING,
+  published STRING,
+  raw_json STRING,
   hourly_min DOUBLE,
   hourly_max DOUBLE,
   first_seen_at TIMESTAMP,
   last_seen_at TIMESTAMP
 )
+USING DELTA
 """)
 
 spark.sql("""
 CREATE TABLE IF NOT EXISTS job_watch.gold_seek_high_rate_roles (
+  provider STRING,
+  scrape_mode STRING,
   source STRING,
   result_id STRING,
   title STRING,
@@ -114,7 +138,22 @@ CREATE TABLE IF NOT EXISTS job_watch.gold_seek_high_rate_roles (
   hourly_max DOUBLE,
   last_seen_at TIMESTAMP
 )
+USING DELTA
 """)
+
+# Upgrade older tables created before provider/scrape_mode columns existed.
+for column_sql in [
+    "provider STRING",
+    "scrape_mode STRING",
+    "published STRING",
+    "raw_json STRING",
+]:
+    try:
+        spark.sql(f"ALTER TABLE job_watch.silver_seek_results ADD COLUMNS ({column_sql})")
+    except Exception as exc:
+        message = str(exc).lower()
+        if "already exists" not in message and "duplicate" not in message:
+            print(f"Could not add silver column {column_sql}: {exc}")
 
 # COMMAND ----------
 
@@ -127,7 +166,7 @@ CREATE TABLE IF NOT EXISTS job_watch.gold_seek_high_rate_roles (
 bronze_rows = []
 silver_rows = []
 errors = []
-direct_warnings = []
+provider_warnings = []
 rejected_rows = []
 seen_canonical_urls = set()
 
@@ -139,8 +178,11 @@ seen_canonical_urls = set()
 # COMMAND ----------
 
 # DBTITLE 1,process and filter payload for job results storage
-def handle_payload(payload, source_name, allowed_domains, query):
+def handle_payload(payload, source_config, query):
     """Save raw payload to bronze buffer and accepted items to silver buffer."""
+    source_name = source_config["source"]
+    allowed_domains = source_config.get("allowed_domains", [])
+
     bronze_rows.append({
         "run_id": RUN_ID,
         "source": source_name,
@@ -152,9 +194,10 @@ def handle_payload(payload, source_name, allowed_domains, query):
     accepted = 0
 
     for item in payload.get("results", []):
-        title = item.get("title") or ""
-        url = item.get("url") or ""
-        content = item.get("content") or ""
+        raw_result = normalize_raw_result(source_config, item)
+        title = raw_result.title
+        url = raw_result.url
+        content = raw_result.content
         clean_url = canonicalize_url(url)
 
         reject_reason = None
@@ -164,10 +207,6 @@ def handle_payload(payload, source_name, allowed_domains, query):
             reject_reason = "domain not allowed"
         elif clean_url in seen_canonical_urls:
             reject_reason = "duplicate url"
-        else:
-            is_job, reason = is_probably_job_result(source_name, clean_url, title, content)
-            if not is_job:
-                reject_reason = reason
 
         if reject_reason:
             rejected_rows.append({
@@ -184,11 +223,15 @@ def handle_payload(payload, source_name, allowed_domains, query):
         hourly_min, hourly_max = parse_hourly_rate(combined_text)
 
         silver_rows.append({
+            "provider": raw_result.provider,
+            "scrape_mode": raw_result.scrape_mode,
             "source": source_name,
             "result_id": make_result_id(clean_url, title),
             "title": title,
             "url": clean_url,
             "content": content,
+            "published": raw_result.published,
+            "raw_json": raw_result.raw_json,
             "hourly_min": hourly_min,
             "hourly_max": hourly_max,
             "first_seen_at": FETCHED_AT.isoformat(),
@@ -201,93 +244,40 @@ def handle_payload(payload, source_name, allowed_domains, query):
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Fetch Bing RSS searches
+# MAGIC ## Fetch providers
 
 # COMMAND ----------
 
-# DBTITLE 1,search sources and handle query results with errors
-for source_config in SEARCH_SOURCES:
-    source_name = source_config["source"]
-    allowed_domains = source_config.get("allowed_domains", [])
-
-    for query in source_config.get("queries", []):
-        print("=" * 100)
-        print("SOURCE:", source_name)
-        print("QUERY:", query)
-
-        try:
-            payload = source_search(source_config, query)
-            accepted = handle_payload(payload, source_name, allowed_domains, query)
-
-            print("RESULTS:", len(payload.get("results", [])))
-            print("ACCEPTED:", accepted)
-            print("FEED URL:", payload.get("feed_url"))
-
-        except Exception as exc:
-            msg = f"Failed source={source_name}, query={query}\n{exc}"
-            print(msg)
-            errors.append(msg)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Fetch authorized direct HTML sources
-
-# COMMAND ----------
-
-# DBTITLE 1,execute direct URL scraping and handle results
-if DIRECT_SCRAPE_ENABLED:
-    for source_config in DIRECT_SOURCES:
-        source_name = source_config["source"]
-        allowed_domains = source_config.get("allowed_domains", [])
-
-        for url in source_config.get("urls", []):
-            print("=" * 100)
-            print("SOURCE:", source_name)
-            print("DIRECT URL:", url)
-
-            try:
-                payload = direct_html_search(source_config, url)
-                accepted = handle_payload(payload, source_name, allowed_domains, url)
-
-                print("RESULTS:", len(payload.get("results", [])))
-                print("ACCEPTED:", accepted)
-
-            except Exception as exc:
-                msg = f"WARNING: Failed direct source={source_name}, url={url}\n{exc}"
-                print(msg)
-                direct_warnings.append(msg)
-else:
-    print("Direct scraping disabled")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Fetch optional custom RSS feeds
-
-# COMMAND ----------
-
-# DBTITLE 1,fetch and process custom RSS feed data with error handl ...
-for feed in CUSTOM_RSS_FEEDS:
-    source_name = feed["source"]
-    feed_url = feed["url"]
-    allowed_domains = feed.get("allowed_domains", [])
-
+# DBTITLE 1,fetch each provider directly and handle normalized results
+for datasource in DATA_SOURCES:
+    provider_name = datasource.provider.value
     print("=" * 100)
-    print("SOURCE:", source_name)
-    print("CUSTOM RSS:", feed_url)
+    print("PROVIDER:", provider_name)
 
     try:
-        payload = fetch_rss_url(feed_url, source_name, query=feed_url)
-        accepted = handle_payload(payload, source_name, allowed_domains, feed_url)
+        payload = datasource.search(SEARCH_CRITERIA, site_filters=SITE_FILTERS)
+        source_config = {
+            "source": payload.get("source", provider_name),
+            "provider": payload.get("provider", provider_name),
+            "mode": payload.get("mode", "search"),
+            "allowed_domains": payload.get("allowed_domains", []),
+        }
+        query = json.dumps({
+            "queries": payload.get("queries", []),
+            "urls": payload.get("urls", []),
+            "site_filters": list(SITE_FILTERS),
+        })
+        accepted = handle_payload(payload, source_config, query)
 
         print("RESULTS:", len(payload.get("results", [])))
         print("ACCEPTED:", accepted)
+        print("QUERIES:", payload.get("queries", []))
+        print("URLS:", payload.get("urls", []))
 
     except Exception as exc:
-        msg = f"Failed custom RSS source={source_name}, url={feed_url}\n{exc}"
+        msg = f"WARNING: Failed provider={provider_name}\n{exc}"
         print(msg)
-        errors.append(msg)
+        provider_warnings.append(msg)
 
 # COMMAND ----------
 
@@ -302,11 +292,11 @@ print("Bronze rows:", len(bronze_rows))
 print("Silver rows:", len(silver_rows))
 print("Rejected rows:", len(rejected_rows))
 print("Errors:", len(errors))
-print("Direct warnings:", len(direct_warnings))
+print("Provider warnings:", len(provider_warnings))
 
-if direct_warnings:
-    print("Direct warning sample:")
-    for warning in direct_warnings[:10]:
+if provider_warnings:
+    print("Provider warning sample:")
+    for warning in provider_warnings[:10]:
         print(warning)
 
 print("Rejected reasons:")
@@ -359,11 +349,15 @@ bronze_df.write.mode("append").saveAsTable("job_watch.bronze_search_runs")
 
 # DBTITLE 1,update job watch results with new seek data
 silver_schema = StructType([
+    StructField("provider", StringType()),
+    StructField("scrape_mode", StringType()),
     StructField("source", StringType()),
     StructField("result_id", StringType()),
     StructField("title", StringType()),
     StructField("url", StringType()),
     StructField("content", StringType()),
+    StructField("published", StringType()),
+    StructField("raw_json", StringType()),
     StructField("hourly_min", DoubleType()),
     StructField("hourly_max", DoubleType()),
     StructField("first_seen_at", StringType()),
@@ -385,13 +379,45 @@ USING new_seek_results source
 ON target.source = source.source
 AND target.result_id = source.result_id
 WHEN MATCHED THEN UPDATE SET
+  target.provider = source.provider,
+  target.scrape_mode = source.scrape_mode,
   target.title = source.title,
   target.url = source.url,
   target.content = source.content,
+  target.published = source.published,
+  target.raw_json = source.raw_json,
   target.hourly_min = source.hourly_min,
   target.hourly_max = source.hourly_max,
   target.last_seen_at = source.last_seen_at
-WHEN NOT MATCHED THEN INSERT *
+WHEN NOT MATCHED THEN INSERT (
+  provider,
+  scrape_mode,
+  source,
+  result_id,
+  title,
+  url,
+  content,
+  published,
+  raw_json,
+  hourly_min,
+  hourly_max,
+  first_seen_at,
+  last_seen_at
+) VALUES (
+  source.provider,
+  source.scrape_mode,
+  source.source,
+  source.result_id,
+  source.title,
+  source.url,
+  source.content,
+  source.published,
+  source.raw_json,
+  source.hourly_min,
+  source.hourly_max,
+  source.first_seen_at,
+  source.last_seen_at
+)
 """)
 
 # COMMAND ----------
@@ -405,6 +431,8 @@ WHEN NOT MATCHED THEN INSERT *
 spark.sql(f"""
 CREATE OR REPLACE TABLE job_watch.gold_seek_high_rate_roles AS
 SELECT
+  provider,
+  scrape_mode,
   source,
   result_id,
   title,
@@ -428,6 +456,8 @@ ORDER BY hourly_max DESC, last_seen_at DESC
 # DBTITLE 1,fetch high rate job roles with hourly salary details
 display(spark.sql("""
 SELECT
+  provider,
+  source,
   title,
   hourly_min,
   hourly_max,
@@ -448,11 +478,13 @@ ORDER BY hourly_max DESC, last_seen_at DESC
 # DBTITLE 1,summarize job watch results by source and rate metrics
 display(spark.sql("""
 SELECT
+  provider,
+  scrape_mode,
   source,
   COUNT(*) AS total_rows,
   COUNT(hourly_max) AS rows_with_rate,
   MAX(hourly_max) AS max_rate
 FROM job_watch.silver_seek_results
-GROUP BY source
+GROUP BY provider, scrape_mode, source
 ORDER BY total_rows DESC
 """))

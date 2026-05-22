@@ -1,8 +1,7 @@
-"""Public RSS/search source helpers. No API keys required."""
+"""Generic RSS/Atom parsing and fetching helpers."""
 
 from __future__ import annotations
 
-import re
 import xml.etree.ElementTree as ET
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -21,9 +20,7 @@ def canonicalize_url(url: str | None) -> str:
         for k, v in query_pairs
         if not k.lower().startswith(blocked_prefixes) and k.lower() not in blocked_exact
     ]
-    return urlunparse(
-        (parsed.scheme, parsed.netloc.lower(), parsed.path.rstrip("/"), "", urlencode(clean_pairs), "")
-    )
+    return urlunparse((parsed.scheme, parsed.netloc.lower(), parsed.path.rstrip("/"), "", urlencode(clean_pairs), ""))
 
 
 def _child_text(element: ET.Element, names: tuple[str, ...]) -> str:
@@ -51,7 +48,6 @@ def parse_rss_or_atom(xml_bytes: bytes) -> list[dict[str, str]]:
             }
         )
 
-    # Basic Atom support.
     ns = {"atom": "http://www.w3.org/2005/Atom"}
     for entry in root.findall(".//atom:entry", ns):
         link = ""
@@ -99,18 +95,3 @@ def fetch_rss_url(feed_url: str, source_name: str, query: str = "") -> dict:
         ) from exc
 
     return {"source": source_name, "query": query, "feed_url": feed_url, "results": results}
-
-
-def bing_rss_search(query: str, source_name: str) -> dict:
-    feed_url = "https://www.bing.com/search?" + urlencode(
-        {"q": query, "format": "rss", "cc": "NZ", "setmkt": "en-NZ"}
-    )
-    return fetch_rss_url(feed_url, source_name, query)
-
-
-def source_search(source_config: dict, query: str) -> dict:
-    source_type = source_config["type"]
-    source_name = source_config["source"]
-    if source_type == "bing_rss":
-        return bing_rss_search(query, source_name)
-    raise ValueError(f"Unsupported source type: {source_type}")

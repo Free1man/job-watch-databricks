@@ -1,27 +1,23 @@
-.PHONY: compile test check smoke-direct-offline smoke-rss smoke-direct-real clean
+.PHONY: compile install-dev test check clean
 
 PYTHON ?= python3
+VENV ?= .venv
 export PYTHONPATH := src:.
 
 compile:
 	$(PYTHON) -m compileall -q src tests notebooks scripts
 
+venv:
+	$(PYTHON) -m venv $(VENV)
+
+install-dev: venv
+	$(VENV)/bin/python -m pip install -U pip
+	$(VENV)/bin/python -m pip install -r requirements-dev.txt
+
 test:
-	$(PYTHON) scripts/run_unit_tests.py
+	$(VENV)/bin/python -m pytest
 
-test-pytest:
-	$(PYTHON) -m pytest -q
-
-smoke-direct-offline:
-	$(PYTHON) scripts/smoke_direct_offline.py
-
-smoke-rss:
-	$(PYTHON) scripts/smoke_rss.py
-
-smoke-direct-real:
-	$(PYTHON) scripts/smoke_direct_real.py
-
-check: compile smoke-direct-offline
+check: compile test
 
 clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

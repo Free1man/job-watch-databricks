@@ -159,6 +159,7 @@ def extract_links_from_html(html: str, base_url: str, allowed_domains: list[str]
         absolute_url = urljoin(base_url, href)
         if not _host_allowed(absolute_url, allowed_domains):
             continue
+
         if absolute_url in seen:
             continue
         seen.add(absolute_url)

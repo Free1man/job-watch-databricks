@@ -1,12 +1,15 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Job Watch results
-# MAGIC View high-rate Auckland software/development contract roles.
+# MAGIC View normalized job results by provider/source.
 
 # COMMAND ----------
 
 # MAGIC %sql
 # MAGIC SELECT
+# MAGIC   provider,
+# MAGIC   scrape_mode,
+# MAGIC   source,
 # MAGIC   title,
 # MAGIC   hourly_min,
 # MAGIC   hourly_max,
@@ -20,19 +23,23 @@
 
 # MAGIC %sql
 # MAGIC SELECT
+# MAGIC   provider,
+# MAGIC   scrape_mode,
 # MAGIC   source,
 # MAGIC   COUNT(*) AS total_rows,
 # MAGIC   COUNT(hourly_max) AS rows_with_rate,
 # MAGIC   MAX(hourly_max) AS max_rate,
 # MAGIC   MAX(last_seen_at) AS latest_seen_at
 # MAGIC FROM job_watch.silver_seek_results
-# MAGIC GROUP BY source
+# MAGIC GROUP BY provider, scrape_mode, source
 # MAGIC ORDER BY total_rows DESC;
 
 # COMMAND ----------
 
 # MAGIC %sql
 # MAGIC SELECT
+# MAGIC   provider,
+# MAGIC   scrape_mode,
 # MAGIC   source,
 # MAGIC   title,
 # MAGIC   url,
