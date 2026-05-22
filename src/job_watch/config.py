@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from .datasources import PayPeriod, Provider, SearchFilter, enabled_datasources
+from .datasources.base import PayPeriod, Provider, SearchFilter
+from .datasources.bing import BingDataSource
+from .datasources.google import GoogleDataSource
+from .datasources.indeed import IndeedDataSource
+from .datasources.seek import SeekDataSource
+from .datasources.trademe import TradeMeDataSource
 
 MIN_RATE = 125
 
@@ -36,4 +41,17 @@ SEARCH_FILTER = SearchFilter(
 )
 
 SEARCH_CRITERIA = SEARCH_FILTER
-DATA_SOURCES = enabled_datasources(ENABLED_PROVIDERS)
+
+ALL_DATA_SOURCES = (
+    SeekDataSource(),
+    TradeMeDataSource(),
+    IndeedDataSource(),
+    GoogleDataSource(),
+    BingDataSource(),
+)
+
+DATA_SOURCES = (
+    ALL_DATA_SOURCES
+    if ENABLED_PROVIDERS is None
+    else tuple(datasource for datasource in ALL_DATA_SOURCES if datasource.provider in ENABLED_PROVIDERS)
+)

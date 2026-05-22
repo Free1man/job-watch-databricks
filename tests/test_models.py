@@ -1,5 +1,4 @@
-from job_watch.datasources import Provider
-from job_watch.datasources.base import infer_provider
+from job_watch.datasources.base import Provider, infer_provider
 from job_watch.models import normalize_raw_result
 
 
