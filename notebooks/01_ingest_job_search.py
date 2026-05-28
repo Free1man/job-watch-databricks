@@ -17,50 +17,19 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,bootstrap job watch imports
+# MAGIC %run ./_bootstrap
+
+# COMMAND ----------
+
 # DBTITLE 1,import libraries and configure job watch environment
 from collections import Counter
 import json
-import os
-import sys
 import uuid
 from datetime import datetime, timezone
 
-from pyspark.sql import functions as F
-from pyspark.sql.types import DoubleType, StringType, StructField, StructType
-
-# Make `src/job_watch` importable in Databricks Repos/Workspace files and local runs.
-def _add_project_src_to_path():
-    roots = []
-
-    def add_root(path):
-        if path and path not in roots:
-            roots.append(path)
-
-    add_root(os.getcwd())
-    if "__file__" in globals():
-        add_root(os.path.dirname(os.path.abspath(__file__)))
-
-    try:
-        notebook_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
-        add_root(os.path.dirname("/Workspace" + notebook_path))
-    except Exception:
-        pass
-
-    for root in list(roots):
-        add_root(os.path.dirname(root))
-        if os.path.basename(root) == "notebooks":
-            add_root(os.path.dirname(root))
-
-    for root in roots:
-        candidate = os.path.abspath(os.path.join(root, "src"))
-        if candidate not in sys.path and os.path.exists(os.path.join(candidate, "job_watch")):
-            sys.path.insert(0, candidate)
-            return
-
-
-_add_project_src_to_path()
-
 from job_watch.config import DATA_SOURCES, MIN_RATE, SEARCH_CRITERIA, SITE_FILTERS
+from job_watch.databricks_migrations import run_migrations
 from job_watch.url_utils import domain_allowed
 from job_watch.models import normalize_raw_result
 from job_watch.parsing import make_result_id, parse_hourly_rate
@@ -86,74 +55,16 @@ print("Site filters:", SITE_FILTERS)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Create Delta schema/tables
+# MAGIC ## Apply database migrations
 # MAGIC
+# MAGIC Database structure is maintained in `sql/migrations/*.sql`.
 # MAGIC Table names still use the old `seek` names until a later table migration.
 
 # COMMAND ----------
 
-# DBTITLE 1,create job watch schema and initial tables setup
-spark.sql("CREATE SCHEMA IF NOT EXISTS job_watch")
-
-spark.sql("""
-CREATE TABLE IF NOT EXISTS job_watch.bronze_search_runs (
-  run_id STRING,
-  source STRING,
-  fetched_at TIMESTAMP,
-  query STRING,
-  response_json STRING
-)
-USING DELTA
-""")
-
-spark.sql("""
-CREATE TABLE IF NOT EXISTS job_watch.silver_seek_results (
-  provider STRING,
-  scrape_mode STRING,
-  source STRING,
-  result_id STRING,
-  title STRING,
-  url STRING,
-  content STRING,
-  published STRING,
-  raw_json STRING,
-  hourly_min DOUBLE,
-  hourly_max DOUBLE,
-  first_seen_at TIMESTAMP,
-  last_seen_at TIMESTAMP
-)
-USING DELTA
-""")
-
-spark.sql("""
-CREATE TABLE IF NOT EXISTS job_watch.gold_seek_high_rate_roles (
-  provider STRING,
-  scrape_mode STRING,
-  source STRING,
-  result_id STRING,
-  title STRING,
-  url STRING,
-  content STRING,
-  hourly_min DOUBLE,
-  hourly_max DOUBLE,
-  last_seen_at TIMESTAMP
-)
-USING DELTA
-""")
-
-# Upgrade older tables created before provider/scrape_mode columns existed.
-for column_sql in [
-    "provider STRING",
-    "scrape_mode STRING",
-    "published STRING",
-    "raw_json STRING",
-]:
-    try:
-        spark.sql(f"ALTER TABLE job_watch.silver_seek_results ADD COLUMNS ({column_sql})")
-    except Exception as exc:
-        message = str(exc).lower()
-        if "already exists" not in message and "duplicate" not in message:
-            print(f"Could not add silver column {column_sql}: {exc}")
+# DBTITLE 1,apply job watch schema migrations
+applied_migrations = run_migrations(spark)
+print("Applied migrations:", applied_migrations)
 
 # COMMAND ----------
 
@@ -175,7 +86,7 @@ seen_canonical_urls = set()
 # MAGIC %md
 # MAGIC ## Result normalisation/filter helper
 
-# COMMAND ----------
+# COMMAND ----------silver_merge_update_assignments
 
 # DBTITLE 1,process and filter payload for job results storage
 def handle_payload(payload, source_config, query):
@@ -326,19 +237,7 @@ if not silver_rows:
 # COMMAND ----------
 
 # DBTITLE 1,define bronze schema and save search runs data
-bronze_schema = StructType([
-    StructField("run_id", StringType()),
-    StructField("source", StringType()),
-    StructField("fetched_at", StringType()),
-    StructField("query", StringType()),
-    StructField("response_json", StringType()),
-])
-
-bronze_df = spark.createDataFrame(bronze_rows, bronze_schema).withColumn(
-    "fetched_at", F.to_timestamp("fetched_at")
-)
-
-bronze_df.write.mode("append").saveAsTable("job_watch.bronze_search_runs")
+DB.append_bronze_rows(spark, bronze_rows)
 
 # COMMAND ----------
 
@@ -348,77 +247,7 @@ bronze_df.write.mode("append").saveAsTable("job_watch.bronze_search_runs")
 # COMMAND ----------
 
 # DBTITLE 1,update job watch results with new seek data
-silver_schema = StructType([
-    StructField("provider", StringType()),
-    StructField("scrape_mode", StringType()),
-    StructField("source", StringType()),
-    StructField("result_id", StringType()),
-    StructField("title", StringType()),
-    StructField("url", StringType()),
-    StructField("content", StringType()),
-    StructField("published", StringType()),
-    StructField("raw_json", StringType()),
-    StructField("hourly_min", DoubleType()),
-    StructField("hourly_max", DoubleType()),
-    StructField("first_seen_at", StringType()),
-    StructField("last_seen_at", StringType()),
-])
-
-silver_df = (
-    spark.createDataFrame(silver_rows, silver_schema)
-    .dropDuplicates(["source", "result_id"])
-    .withColumn("first_seen_at", F.to_timestamp("first_seen_at"))
-    .withColumn("last_seen_at", F.to_timestamp("last_seen_at"))
-)
-
-silver_df.createOrReplaceTempView("new_seek_results")
-
-spark.sql("""
-MERGE INTO job_watch.silver_seek_results target
-USING new_seek_results source
-ON target.source = source.source
-AND target.result_id = source.result_id
-WHEN MATCHED THEN UPDATE SET
-  target.provider = source.provider,
-  target.scrape_mode = source.scrape_mode,
-  target.title = source.title,
-  target.url = source.url,
-  target.content = source.content,
-  target.published = source.published,
-  target.raw_json = source.raw_json,
-  target.hourly_min = source.hourly_min,
-  target.hourly_max = source.hourly_max,
-  target.last_seen_at = source.last_seen_at
-WHEN NOT MATCHED THEN INSERT (
-  provider,
-  scrape_mode,
-  source,
-  result_id,
-  title,
-  url,
-  content,
-  published,
-  raw_json,
-  hourly_min,
-  hourly_max,
-  first_seen_at,
-  last_seen_at
-) VALUES (
-  source.provider,
-  source.scrape_mode,
-  source.source,
-  source.result_id,
-  source.title,
-  source.url,
-  source.content,
-  source.published,
-  source.raw_json,
-  source.hourly_min,
-  source.hourly_max,
-  source.first_seen_at,
-  source.last_seen_at
-)
-""")
+DB.merge_silver_rows(spark, silver_rows)
 
 # COMMAND ----------
 
@@ -428,23 +257,7 @@ WHEN NOT MATCHED THEN INSERT (
 # COMMAND ----------
 
 # DBTITLE 1,create high rate roles table from silver seek results
-spark.sql(f"""
-CREATE OR REPLACE TABLE job_watch.gold_seek_high_rate_roles AS
-SELECT
-  provider,
-  scrape_mode,
-  source,
-  result_id,
-  title,
-  url,
-  content,
-  hourly_min,
-  hourly_max,
-  last_seen_at
-FROM job_watch.silver_seek_results
-WHERE hourly_max >= {MIN_RATE}
-ORDER BY hourly_max DESC, last_seen_at DESC
-""")
+DB.rebuild_gold_high_rate_roles(spark, MIN_RATE)
 
 # COMMAND ----------
 
@@ -454,19 +267,7 @@ ORDER BY hourly_max DESC, last_seen_at DESC
 # COMMAND ----------
 
 # DBTITLE 1,fetch high rate job roles with hourly salary details
-display(spark.sql("""
-SELECT
-  provider,
-  source,
-  title,
-  hourly_min,
-  hourly_max,
-  url,
-  content,
-  last_seen_at
-FROM job_watch.gold_seek_high_rate_roles
-ORDER BY hourly_max DESC, last_seen_at DESC
-"""))
+display(DB.high_rate_roles_df(spark))
 
 # COMMAND ----------
 
@@ -476,15 +277,4 @@ ORDER BY hourly_max DESC, last_seen_at DESC
 # COMMAND ----------
 
 # DBTITLE 1,summarize job watch results by source and rate metrics
-display(spark.sql("""
-SELECT
-  provider,
-  scrape_mode,
-  source,
-  COUNT(*) AS total_rows,
-  COUNT(hourly_max) AS rows_with_rate,
-  MAX(hourly_max) AS max_rate
-FROM job_watch.silver_seek_results
-GROUP BY provider, scrape_mode, source
-ORDER BY total_rows DESC
-"""))
+display(DB.source_summary_df(spark))

@@ -5,15 +5,16 @@
 
 # COMMAND ----------
 
-TABLES = [
-    "job_watch.bronze_search_runs",
-    "job_watch.silver_seek_results",
-    "job_watch.gold_seek_high_rate_roles",
-]
+# DBTITLE 1,bootstrap job watch imports
+# MAGIC %run ./_bootstrap
 
-for table in TABLES:
-    if spark.catalog.tableExists(table):
-        spark.sql(f"TRUNCATE TABLE {table}")
+# COMMAND ----------
+
+# DBTITLE 1,wipe data tables
+truncated_tables = DB.truncate_data_tables(spark)
+
+for table in DB.data_tables():
+    if table in truncated_tables:
         print(f"Wiped {table}")
     else:
         print(f"Skipped missing table: {table}")
@@ -25,7 +26,7 @@ for table in TABLES:
 
 # COMMAND ----------
 
-for table in TABLES:
+for table in DB.data_tables():
     if spark.catalog.tableExists(table):
         count = spark.table(table).count()
         print(f"{table}: {count} rows")

@@ -5,48 +5,20 @@
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC SELECT
-# MAGIC   provider,
-# MAGIC   scrape_mode,
-# MAGIC   source,
-# MAGIC   title,
-# MAGIC   hourly_min,
-# MAGIC   hourly_max,
-# MAGIC   url,
-# MAGIC   content,
-# MAGIC   last_seen_at
-# MAGIC FROM job_watch.gold_seek_high_rate_roles
-# MAGIC ORDER BY hourly_max DESC, last_seen_at DESC;
+# DBTITLE 1,bootstrap job watch imports
+# MAGIC %run ./_bootstrap
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC SELECT
-# MAGIC   provider,
-# MAGIC   scrape_mode,
-# MAGIC   source,
-# MAGIC   COUNT(*) AS total_rows,
-# MAGIC   COUNT(hourly_max) AS rows_with_rate,
-# MAGIC   MAX(hourly_max) AS max_rate,
-# MAGIC   MAX(last_seen_at) AS latest_seen_at
-# MAGIC FROM job_watch.silver_seek_results
-# MAGIC GROUP BY provider, scrape_mode, source
-# MAGIC ORDER BY total_rows DESC;
+# DBTITLE 1,display high-rate roles
+display(DB.high_rate_roles_df(spark))
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC SELECT
-# MAGIC   provider,
-# MAGIC   scrape_mode,
-# MAGIC   source,
-# MAGIC   title,
-# MAGIC   url,
-# MAGIC   content,
-# MAGIC   hourly_min,
-# MAGIC   hourly_max,
-# MAGIC   last_seen_at
-# MAGIC FROM job_watch.silver_seek_results
-# MAGIC ORDER BY last_seen_at DESC
-# MAGIC LIMIT 100;
+# DBTITLE 1,display source summary
+display(DB.source_summary_df(spark))
+
+# COMMAND ----------
+
+# DBTITLE 1,display recent silver results
+display(DB.recent_silver_results_df(spark, limit=100))

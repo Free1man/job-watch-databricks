@@ -7,3 +7,5 @@ dist/
 build/
 .ipynb_checkpoints/
 .vscode/
+
+.databricks
